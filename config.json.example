@@ -1,0 +1,13 @@
+{ 
+    "aws":
+        {
+            "accessKeyId": "Your IAM AWS AccessKey ID",
+            "secretAccessKey": "Your IAM AWS SecretKey ID",
+            "region": "Your Region",
+            "keyName": "Your EC2 KeyPair name"
+        },
+    "server":
+        {
+            "port": 3000
+        }
+}

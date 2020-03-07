@@ -4,7 +4,8 @@
   "description": "AWS Javascript SDK Demo for ROAM",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postInstall": "cp config.json.example config.json"
   },
   "keywords": [
     "aws",
