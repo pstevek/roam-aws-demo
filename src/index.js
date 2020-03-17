@@ -1,10 +1,11 @@
 const   express = require('express'),
-        aws = require('aws-sdk')
-        bodyParser = require('body-parser'),
-        inputData = null,
-        app = express();
+    aws = require('aws-sdk'),
+    bodyParser = require('body-parser'),
+    app = express();
 
-app.use(bodyParser.urlencoded({ extended: false }));        
+let inputData = null;
+
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 app.post('/create-environment', (req, res) => {
@@ -14,21 +15,29 @@ app.post('/create-environment', (req, res) => {
         secretAccessKey: req.body.secretAccessKey,
         region: req.body.region,
         ec2KeyPair: req.body.ec2KeyPair,
-        securityGroupId: null,
-        subnetId: null,
-        vpcId: null,
-        ec2InstanceId: null
+        ec2SecurityGroupId: null,
+        ec2SubnetId: null,
+        ec2InstanceId: null,
+        elbDNSName: null,
+        vpcId: null
     };
 
-    aws.config.setPromisesDependency();
+    aws.config.setPromisesDependency(null);
     aws.config.update({
         accessKeyId: inputData.accessKeyId,
         secretAccessKey: inputData.secretAccessKey,
         region: inputData.region
     });
 
-    // Create EC2 service object
-    const ec2 = new aws.EC2({apiVersion: '2016-11-15'});
+    aws.config.apiVersions = {
+        ec2: '2016-11-15',
+        elb: '2012-06-01',
+        rds: '2014-10-31',
+    };
+
+    const   ec2 = new aws.EC2(),
+            rds = new aws.RDS(),
+            elb = new aws.ELB();
 
     // Create promise on an EC2 instance
     const vpcPromise = ec2.createVpc({CidrBlock: "10.0.0.0/16"}).promise();
@@ -47,15 +56,15 @@ app.post('/create-environment', (req, res) => {
 
             subnetPromise.then(
                 function(data) {
-                    inputData.subnetId = data.Subnet.SubnetId;
-                    console.log("Subnet for Vpc : " + inputData.vpcId + " successfully created ! SubnetId : " + inputData.subnetId);
+                    inputData.ec2SubnetId = data.Subnet.SubnetId;
+                    console.log("Subnet for Vpc : " + inputData.vpcId + " successfully created ! SubnetId : " + inputData.ec2SubnetId);
                 }
             ).catch(
                 function(err) {
                     console.error(err, err.stack);
                 }
             );
-            
+
             const paramsSecurityGroup = {
                 Description: 'Security Group for EC2 instance',
                 GroupName: 'roam-sg-demo',
@@ -66,10 +75,10 @@ app.post('/create-environment', (req, res) => {
 
             sgPromise.then(
                 function(data) {
-                    inputData.securityGroupId = data.GroupId;
-                    console.log("Security Group successfully created ! GroupId : ", inputData.securityGroupId);
+                    inputData.ec2SecurityGroupId = data.GroupId;
+                    console.log("Security Group successfully created ! GroupId : ", inputData.ec2SecurityGroupId);
                     const paramsIngress = {
-                        GroupId: inputData.securityGroupId,
+                        GroupId: inputData.ec2SecurityGroupId,
                         IpPermissions: [
                             {
                                 IpProtocol: "tcp",
@@ -98,9 +107,9 @@ app.post('/create-environment', (req, res) => {
                             };
 
                             ec2.attachInternetGateway(paramsGateway).promise().then(
-                               function(data) {
-                                   console.log("Internet Gateway successfully attached");
-                               } 
+                                function(data) {
+                                    console.log("Internet Gateway successfully attached");
+                                }
                             ).catch(
                                 function(err) {
                                     console.error(err, err.stack);
@@ -124,10 +133,10 @@ app.post('/create-environment', (req, res) => {
                                 KeyName: inputData.ec2KeyPair,
                                 MinCount: 1,
                                 MaxCount: 1,
-                                SecurityGroupIds: [inputData.securityGroupId],
-                                SubnetId: inputData.subnetId
+                                SecurityGroupIds: [inputData.ec2SecurityGroupId],
+                                SubnetId: inputData.ec2SubnetId
                             };
-                            
+
                             // Run the EC2 instance
                             const instancePromise = ec2.runInstances(instanceParams).promise();
 
@@ -137,12 +146,14 @@ app.post('/create-environment', (req, res) => {
                                     inputData.ec2InstanceId = data.Instances[0].InstanceId;
                                     console.log("Created EC2 instance : ", inputData.ec2InstanceId);
                                     // Add tags to the instance
-                                    tagParams = {Resources: [inputData.ec2InstanceId], Tags: [
-                                        {
-                                            Key: 'Name',
-                                            Value: 'EC2 ROAM Demo'
-                                        }
-                                    ]};
+                                    const tagParams = {
+                                        Resources:[inputData.ec2InstanceId],
+                                        Tags: [
+                                            {
+                                                Key: 'Name',
+                                                Value: 'EC2 ROAM Demo'
+                                            }
+                                        ]};
 
                                     setTimeout(() => {
                                         // Allocate the Elastic IP address
@@ -168,28 +179,76 @@ app.post('/create-environment', (req, res) => {
                                                         console.error(err, err.stack);
                                                     }
                                                 );
+
+                                                const elbParams = {
+                                                    Listeners: [
+                                                        {
+                                                            InstancePort: 80,
+                                                            InstanceProtocol: "HTTP",
+                                                            LoadBalancerPort: 80,
+                                                            Protocol: "HTTP"
+                                                        }
+                                                    ],
+                                                    LoadBalancerName: "roam-load-balancer",
+                                                    SecurityGroups: [inputData.ec2SecurityGroupId],
+                                                    Subnets: [inputData.ec2SubnetId]
+                                                };
+
+                                                const elbPromise = elb.createLoadBalancer(elbParams).promise();
+
+                                                elbPromise.then(
+                                                    function (data) {
+                                                        console.log("ELB DNSName: ", data.DNSName);
+                                                        inputData.elbDNSName = data.DNSName;
+
+                                                        const rdsParams = {
+                                                            DBInstanceClass: "db.t2.micro",
+                                                            DBInstanceIdentifier: "mydbinstance",
+                                                            MasterUsername: "pstevek",
+                                                            MasterUserPassword: "password1234",
+                                                            DBName: "roamdb",
+                                                            Engine: "mysql",
+                                                            StorageType: "standard",
+                                                            AllocatedStorage: 10,
+                                                        };
+
+                                                        setTimeout( () => {
+                                                            const rdsPromise = rds.createDBInstance(rdsParams).promise();
+
+                                                            rdsPromise.then(
+                                                                function (data) {
+                                                                    console.log("RDS Data : ", data);
+                                                                }
+                                                            ).catch(
+                                                                function(err) {
+                                                                    console.error(err, err.stack);
+                                                                }
+                                                            );
+                                                        }, 40000);
+                                                    }
+                                                );
                                             }
                                         ).catch(
                                             function(err) {
                                                 console.error(err, err.stack);
                                             }
                                         );
-                                    }, 30000);
+                                    }, 50000);
 
                                     // Create a promise on an EC2 service object
-                                    var tagPromise = ec2.createTags(tagParams).promise();
+                                    const tagPromise = ec2.createTags(tagParams).promise();
                                     // Handle promise's fulfilled/rejected states
                                     tagPromise.then(
                                         function(data) {
                                             console.log("EC2 Instance tagged");
                                         }).catch(
-                                            function(err) {
-                                                console.error(err, err.stack);
-                                            });
+                                        function(err) {
+                                            console.error(err, err.stack);
+                                        });
                                 }).catch(
-                                    function(err) {
-                                        console.error(err, err.stack);
-                                    });
+                                function(err) {
+                                    console.error(err, err.stack);
+                                });
                         }
                     ).catch(
                         function(err) {
@@ -212,9 +271,10 @@ app.post('/create-environment', (req, res) => {
             message: "Enviromnent created successfully !",
             VpcId : inputData.vpcId,
             EC2InstanceId : inputData.ec2InstanceId,
+            ELB: inputData.elbDNSName,
             success: true
         });
-    }, 40000)
+    }, 100000)
 });
 
 module.exports = app;
