@@ -128,7 +128,7 @@ app.post('/create-environment', (req, res) => {
                         function(data) {
                             console.log("Ingress Successfully Set : ", data);
                             const instanceParams = {
-                                ImageId: 'ami-0a887e401f7654935',
+                                ImageId: 'ami-0fc61db8544a617ed',
                                 InstanceType: 't2.micro',
                                 KeyName: inputData.ec2KeyPair,
                                 MinCount: 1,
