@@ -2,6 +2,9 @@
 
 ### 1. Prerequesites
 
+For the purposes of this demo, we can only select Amazon Machine Images from one region.
+The region used for this demo is `us-east-1`.
+
 - NodeJS
 - Postman
 - AWS IAM User AccessKey & SecretAccessKey
