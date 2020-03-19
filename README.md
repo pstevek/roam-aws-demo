@@ -2,7 +2,7 @@
 
 ### 1. Prerequesites
 
-For the purposes of this demo, we can only select Amazon Machine Images from one region.
+For the purposes of this demo, we can only select Amazon Machine Images from one region.<br>
 The region used for this demo is `us-east-1`.
 
 - NodeJS
